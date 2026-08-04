@@ -1,0 +1,47 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+dist/
+build/
+*.egg
+
+# Node / CDK
+infra/node_modules/
+infra/cdk.context.json
+infra/dist/
+*.js
+*.d.ts
+!infra/**/*.ts
+infra/**/*.js
+infra/**/*.d.ts
+
+# OS / IDE
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Secrets / env
+.env
+.env.*
+!.env.example
+*.pem
+credentials.json
+
+# Docker / local
+.docker/
+tmp/
+*.log
+
+# Test artifacts
+.reports/
+eval-output/

@@ -1,0 +1,74 @@
+[build-system]
+requires = ["setuptools>=75", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "aws-agentic-quality-gate"
+version = "0.1.0"
+description = "Automated Agentic CI/CD Evaluation Engine using AWS and LLM-as-a-Judge"
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "Apache-2.0" }
+authors = [{ name = "Agentic Quality Gate" }]
+keywords = ["aws", "bedrock", "rag", "agents", "deepeval", "ragas", "cicd"]
+dependencies = [
+  "pydantic>=2.8,<3",
+  "pydantic-settings>=2.4,<3",
+  "boto3>=1.35,<2",
+  "botocore>=1.35,<2",
+  "aws-lambda-powertools[tracer]>=3.4,<4",
+  "httpx>=0.27,<1",
+  "orjson>=3.10,<4",
+  "tenacity>=8.5,<10",
+]
+
+[project.optional-dependencies]
+worker = [
+  "deepeval>=2.0,<3",
+  "ragas>=0.2.10,<0.3",
+  "datasets>=2.21,<4",
+  "langchain-aws>=0.2,<0.3",
+]
+dev = [
+  "pytest>=8.3,<9",
+  "pytest-cov>=5,<7",
+  "moto[s3,sqs,dynamodb]>=5.0,<6",
+  "ruff>=0.6,<1",
+  "mypy>=1.11,<2",
+]
+
+[project.scripts]
+aqg-eval-local = "eval_common.local_eval:main"
+
+[tool.setuptools.packages.find]
+where = ["packages/eval_common"]
+include = ["eval_common*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = [
+  "packages/eval_common",
+  "services/dispatcher",
+  "services/aggregator",
+  "services/worker",
+]
+addopts = "-q --strict-markers"
+markers = [
+  "unit: fast tests with no AWS",
+  "integration: tests that mock AWS with moto",
+]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 120
+src = ["packages", "services", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "N", "SIM"]
+ignore = ["B008", "SIM105", "SIM102"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+ignore_missing_imports = true
+mypy_path = "packages/eval_common"
