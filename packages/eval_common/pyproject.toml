@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=75", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "eval-common"
+version = "0.1.0"
+description = "Shared contracts, config, and AWS helpers for the Agentic Quality Gate"
+requires-python = ">=3.12"
+dependencies = [
+  "pydantic>=2.8,<3",
+  "pydantic-settings>=2.4,<3",
+  "boto3>=1.35,<2",
+  "orjson>=3.10,<4",
+  "tenacity>=8.5,<10",
+]
+
+[tool.setuptools.packages.find]
+include = ["eval_common*"]
