@@ -1,0 +1,180 @@
+{
+  "version": "1.0",
+  "name": "agentic-rag-toolcalling-golden",
+  "description": "Sample golden set covering grounded RAG answers, tool selection, and hybrid agent traces. Replace recorded_trace with live agent output in EVAL_MODE=online.",
+  "cases": [
+    {
+      "id": "rag-refund-policy",
+      "suite": "rag",
+      "query": "What is the refund window for annual plans?",
+      "expected_answer": "Annual plans can be refunded within 14 days of purchase if usage is under 10% of included quota.",
+      "expected_contexts": [
+        "Refund policy: annual subscriptions may be refunded within 14 days of purchase provided usage is below 10% of the included quota. Monthly plans are non-refundable after 48 hours."
+      ],
+      "expected_tools": ["search_docs"],
+      "recorded_trace": {
+        "answer": "Annual plans can be refunded within 14 days of purchase if usage is under 10% of included quota.",
+        "retrieved_contexts": [
+          "Refund policy: annual subscriptions may be refunded within 14 days of purchase provided usage is below 10% of the included quota. Monthly plans are non-refundable after 48 hours."
+        ],
+        "tool_calls": [{ "name": "search_docs", "arguments": { "query": "refund window annual plans" } }]
+      }
+    },
+    {
+      "id": "rag-slo-latency",
+      "suite": "rag",
+      "query": "What p99 latency SLO do we commit to for the checkout API in us-east-1?",
+      "expected_answer": "The checkout API SLO is 250ms p99 in us-east-1 during normal operations.",
+      "expected_contexts": [
+        "Service catalog: checkout-api production SLO is 250ms p99 in us-east-1. Error budget is 0.1% availability per 30 days."
+      ],
+      "expected_tools": ["search_docs"],
+      "recorded_trace": {
+        "answer": "The checkout API SLO is 250ms p99 in us-east-1 during normal operations.",
+        "retrieved_contexts": [
+          "Service catalog: checkout-api production SLO is 250ms p99 in us-east-1. Error budget is 0.1% availability per 30 days."
+        ],
+        "tool_calls": [{ "name": "search_docs", "arguments": { "query": "checkout API p99 SLO us-east-1" } }]
+      }
+    },
+    {
+      "id": "rag-no-hallucinated-price",
+      "suite": "rag",
+      "query": "How much does the Enterprise plan cost per seat?",
+      "expected_answer": "The retrieved documents do not list a per-seat Enterprise price; they say to contact sales.",
+      "expected_contexts": [
+        "Pricing page: Enterprise is custom. Contact sales@example.com for a quote. Team plan is $49 per user per month."
+      ],
+      "expected_tools": ["search_docs"],
+      "recorded_trace": {
+        "answer": "The retrieved documents do not list a per-seat Enterprise price; they say to contact sales.",
+        "retrieved_contexts": [
+          "Pricing page: Enterprise is custom. Contact sales@example.com for a quote. Team plan is $49 per user per month."
+        ],
+        "tool_calls": [{ "name": "search_docs", "arguments": { "query": "Enterprise plan cost per seat" } }]
+      }
+    },
+    {
+      "id": "tool-create-ticket",
+      "suite": "tool_calling",
+      "query": "Open a Sev-2 ticket for checkout 5xx errors in prod and assign it to the payments on-call.",
+      "expected_answer": "Created ticket INC-4821 as Sev-2 and assigned it to the payments on-call rotation.",
+      "expected_tools": ["create_incident", "lookup_oncall"],
+      "recorded_trace": {
+        "answer": "Created ticket INC-4821 as Sev-2 and assigned it to the payments on-call rotation.",
+        "retrieved_contexts": [],
+        "tool_calls": [
+          { "name": "lookup_oncall", "arguments": { "team": "payments" }, "result": "alice@example.com" },
+          {
+            "name": "create_incident",
+            "arguments": { "severity": "sev-2", "service": "checkout", "assignee": "alice@example.com" },
+            "result": "INC-4821"
+          }
+        ]
+      }
+    },
+    {
+      "id": "tool-no-destructive-extra-call",
+      "suite": "tool_calling",
+      "query": "Look up the current on-call for data-platform. Do not page them.",
+      "expected_answer": "The current data-platform on-call is bob@example.com. No page was sent.",
+      "expected_tools": ["lookup_oncall"],
+      "recorded_trace": {
+        "answer": "The current data-platform on-call is bob@example.com. No page was sent.",
+        "tool_calls": [
+          { "name": "lookup_oncall", "arguments": { "team": "data-platform" }, "result": "bob@example.com" }
+        ]
+      }
+    },
+    {
+      "id": "hybrid-kb-then-ticket",
+      "suite": "hybrid",
+      "query": "Is a 14-day refund still valid for annual plans bought yesterday, and if yes file a billing ticket?",
+      "expected_answer": "Yes — annual plans are refundable within 14 days. I filed billing ticket BILL-77.",
+      "expected_contexts": [
+        "Refund policy: annual subscriptions may be refunded within 14 days of purchase provided usage is below 10% of the included quota."
+      ],
+      "expected_tools": ["search_docs", "create_ticket"],
+      "recorded_trace": {
+        "answer": "Yes — annual plans are refundable within 14 days. I filed billing ticket BILL-77.",
+        "retrieved_contexts": [
+          "Refund policy: annual subscriptions may be refunded within 14 days of purchase provided usage is below 10% of the included quota."
+        ],
+        "tool_calls": [
+          { "name": "search_docs", "arguments": { "query": "annual refund 14 days" } },
+          { "name": "create_ticket", "arguments": { "queue": "billing", "reason": "annual refund" }, "result": "BILL-77" }
+        ]
+      }
+    },
+    {
+      "id": "rag-multi-hop-region",
+      "suite": "rag",
+      "query": "Which region hosts the primary payments cluster and what is its RPO?",
+      "expected_answer": "Primary payments cluster is in us-west-2 with an RPO of 60 seconds.",
+      "expected_contexts": [
+        "DR runbook: payments primary region is us-west-2. DR region is us-east-1. RPO is 60 seconds; RTO is 15 minutes."
+      ],
+      "expected_tools": ["search_docs"],
+      "recorded_trace": {
+        "answer": "Primary payments cluster is in us-west-2 with an RPO of 60 seconds.",
+        "retrieved_contexts": [
+          "DR runbook: payments primary region is us-west-2. DR region is us-east-1. RPO is 60 seconds; RTO is 15 minutes."
+        ],
+        "tool_calls": [{ "name": "search_docs", "arguments": { "query": "payments primary region RPO" } }]
+      }
+    },
+    {
+      "id": "tool-sql-readonly",
+      "suite": "tool_calling",
+      "query": "How many failed checkouts happened in the last hour? Use the analytics warehouse.",
+      "expected_answer": "There were 37 failed checkouts in the last hour.",
+      "expected_tools": ["warehouse_query"],
+      "recorded_trace": {
+        "answer": "There were 37 failed checkouts in the last hour.",
+        "tool_calls": [
+          {
+            "name": "warehouse_query",
+            "arguments": {
+              "sql": "select count(*) as failed from checkout_events where status='failed' and ts > now() - interval '1 hour'"
+            },
+            "result": "37"
+          }
+        ]
+      }
+    },
+    {
+      "id": "hybrid-policy-grounded-action",
+      "suite": "hybrid",
+      "query": "According to the retention policy, can I delete logs older than 90 days from the audit bucket?",
+      "expected_answer": "Yes. The retention policy allows deletion of audit logs after 90 days. I did not delete any objects; confirm before running a delete job.",
+      "expected_contexts": [
+        "Log retention: application logs 30 days, audit logs 90 days, then eligible for deletion. Legal hold objects are exempt."
+      ],
+      "expected_tools": ["search_docs"],
+      "recorded_trace": {
+        "answer": "Yes. The retention policy allows deletion of audit logs after 90 days. I did not delete any objects; confirm before running a delete job.",
+        "retrieved_contexts": [
+          "Log retention: application logs 30 days, audit logs 90 days, then eligible for deletion. Legal hold objects are exempt."
+        ],
+        "tool_calls": [{ "name": "search_docs", "arguments": { "query": "audit log retention deletion 90 days" } }]
+      }
+    },
+    {
+      "id": "rag-citation-grounding",
+      "suite": "rag",
+      "query": "Summarize the two authentication methods supported by the public API.",
+      "expected_answer": "The public API supports API keys and OAuth 2.0 client-credentials. Session cookies are not supported.",
+      "expected_contexts": [
+        "Auth guide: public API authentication is API keys (header X-API-Key) or OAuth 2.0 client-credentials. Cookie/session auth is web-console only."
+      ],
+      "expected_tools": ["search_docs"],
+      "recorded_trace": {
+        "answer": "The public API supports API keys and OAuth 2.0 client-credentials. Session cookies are not supported.",
+        "retrieved_contexts": [
+          "Auth guide: public API authentication is API keys (header X-API-Key) or OAuth 2.0 client-credentials. Cookie/session auth is web-console only."
+        ],
+        "tool_calls": [{ "name": "search_docs", "arguments": { "query": "public API authentication methods" } }]
+      }
+    }
+  ]
+}
