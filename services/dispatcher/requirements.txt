@@ -1,0 +1,5 @@
+pydantic>=2.8,<3
+pydantic-settings>=2.4,<3
+aws-lambda-powertools[tracer]>=3.4,<4
+orjson>=3.10,<4
+# boto3 is provided by the Lambda runtime
