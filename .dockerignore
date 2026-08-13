@@ -1,0 +1,14 @@
+.git
+**/.venv
+**/node_modules
+**/cdk.out
+**/.pytest_cache
+**/__pycache__
+**/*.pyc
+infra
+.github
+datasets
+tests
+README.md
+.env
+.env.*
