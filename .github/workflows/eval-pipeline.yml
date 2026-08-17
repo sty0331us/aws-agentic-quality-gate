@@ -1,0 +1,119 @@
+name: Agentic quality gate
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  workflow_dispatch:
+    inputs:
+      dataset_key:
+        description: "S3 key under the datasets bucket (optional override)"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+  checks: write
+  pull-requests: write
+
+concurrency:
+  group: aqg-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  unit:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install
+        run: pip install -e ".[dev]"
+      - name: Ruff
+        run: ruff check packages services tests
+      - name: Pytest
+        run: pytest tests -q
+
+  evaluate:
+    name: LLM-as-a-Judge eval (AWS)
+    needs: unit
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    if: ${{ vars.AQG_ROLE_ARN != '' }}
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AQG_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Upload golden dataset shard source
+        id: upload
+        env:
+          DATASET_BUCKET: ${{ vars.AQG_DATASET_BUCKET }}
+          SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          KEY="golden/${SHA}.json"
+          aws s3 cp datasets/golden_dataset_sample.json "s3://${DATASET_BUCKET}/${KEY}"
+          echo "key=${KEY}" >> "$GITHUB_OUTPUT"
+
+      - name: Dispatch evaluation run
+        id: dispatch
+        env:
+          DISPATCHER: ${{ vars.AQG_DISPATCHER_FUNCTION }}
+          DATASET_BUCKET: ${{ vars.AQG_DATASET_BUCKET }}
+          KEY: ${{ inputs.dataset_key || steps.upload.outputs.key }}
+          SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          PR: ${{ github.event.pull_request.number || 0 }}
+          REPO: ${{ github.repository }}
+        run: |
+          PAYLOAD=$(jq -nc \
+            --arg bucket "$DATASET_BUCKET" \
+            --arg key "$KEY" \
+            --arg sha "$SHA" \
+            --arg repo "$REPO" \
+            --argjson pr "$PR" \
+            '{dataset_bucket:$bucket,dataset_key:$key,git_sha:$sha,pr_number:$pr,repo:$repo,eval_mode:"offline"}')
+          aws lambda invoke \
+            --function-name "$DISPATCHER" \
+            --cli-binary-format raw-in-base64-out \
+            --payload "$PAYLOAD" \
+            dispatch-out.json
+          cat dispatch-out.json
+          RUN_ID=$(jq -r '.eval_run_id' dispatch-out.json)
+          echo "eval_run_id=${RUN_ID}" >> "$GITHUB_OUTPUT"
+
+      - name: Wait for aggregate report
+        env:
+          RESULTS_BUCKET: ${{ vars.AQG_RESULTS_BUCKET }}
+          RUN_ID: ${{ steps.dispatch.outputs.eval_run_id }}
+        run: |
+          set -euo pipefail
+          KEY="runs/${RUN_ID}/report.json"
+          echo "Polling s3://${RESULTS_BUCKET}/${KEY}"
+          for i in $(seq 1 60); do
+            if aws s3 cp "s3://${RESULTS_BUCKET}/${KEY}" report.json 2>/dev/null; then
+              echo "Report ready after ${i} attempts"
+              cat report.json
+              STATUS=$(jq -r '.status' report.json)
+              PASSED=$(jq -r '.decision.passed' report.json)
+              echo "status=${STATUS}" >> "$GITHUB_OUTPUT"
+              if [ "$PASSED" != "true" ]; then
+                echo "::error::Agentic quality gate ${STATUS}"
+                jq -r '.decision.failures[]' report.json
+                exit 1
+              fi
+              exit 0
+            fi
+            sleep 20
+          done
+          echo "::error::Timed out waiting for eval report ${RUN_ID}"
+          exit 1
