@@ -81,7 +81,7 @@ jobs:
             --arg sha "$SHA" \
             --arg repo "$REPO" \
             --argjson pr "$PR" \
-            '{dataset_bucket:$bucket,dataset_key:$key,git_sha:$sha,pr_number:$pr,repo:$repo,eval_mode:"offline"}')
+            '{dataset_bucket:$bucket,dataset_key:$key,git_sha:$sha,dataset_id:$sha,pr_number:$pr,repo:$repo,eval_mode:"candidate",eval_backend:"deepeval"}')
           aws lambda invoke \
             --function-name "$DISPATCHER" \
             --cli-binary-format raw-in-base64-out \
@@ -105,9 +105,10 @@ jobs:
               cat report.json
               STATUS=$(jq -r '.status' report.json)
               PASSED=$(jq -r '.decision.passed' report.json)
-              echo "status=${STATUS}" >> "$GITHUB_OUTPUT"
+              OVERALL=$(jq -r '.overall_score' report.json)
+              echo "status=${STATUS} overall=${OVERALL}" >> "$GITHUB_OUTPUT"
               if [ "$PASSED" != "true" ]; then
-                echo "::error::Agentic quality gate ${STATUS}"
+                echo "::error::Agentic quality gate ${STATUS} (overall ${OVERALL} < 0.85)"
                 jq -r '.decision.failures[]' report.json
                 exit 1
               fi

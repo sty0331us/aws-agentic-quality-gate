@@ -22,6 +22,7 @@ def markdown_report(report: AggregateReport) -> str:
     lines = [
         f"## Agentic Quality Gate — **{headline}**",
         "",
+        f"- **Overall score: {report.overall_score:.3f}** (gate: ≥ {report.thresholds.overall:.2f})",
         f"- Run: `{report.eval_run_id}`",
         f"- Judge: `{report.judge_model_id}`",
         f"- Cases: **{report.passed_cases}/{report.completed_cases}** passed "
@@ -47,4 +48,7 @@ def markdown_report(report: AggregateReport) -> str:
 
 def check_title(report: AggregateReport) -> str:
     verb = "passed" if report.decision.passed else "failed"
-    return f"Agentic quality gate {verb} ({report.pass_rate:.0%} cases, run {report.eval_run_id})"
+    return (
+        f"Agentic quality gate {verb} (overall {report.overall_score:.3f} "
+        f"vs {report.thresholds.overall:.2f}, run {report.eval_run_id})"
+    )

@@ -10,8 +10,8 @@ export interface EvalOpenSearchProps {
 }
 
 /**
- * OpenSearch Serverless collection for eval reports and per-case scores.
- * Network policy is IAM-only (no public access). Encryption uses AWS-owned keys.
+ * OpenSearch Serverless collection for audit logs and per-sample CoT traces.
+ * IAM data-access policy; public network policy so Lambda can reach AOSS.
  */
 export class EvalOpenSearch extends Construct {
   public readonly collection: oss.CfnCollection;

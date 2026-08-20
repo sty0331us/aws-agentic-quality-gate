@@ -78,6 +78,7 @@ def aggregate_metric(
 
 def decide_gate(
     *,
+    overall_score: float,
     metrics: list[MetricAggregate],
     pass_rate: float,
     error_rate: float,
@@ -93,13 +94,12 @@ def decide_gate(
         failures.append("no case results were produced")
     if error_rate > thresholds.max_error_rate:
         failures.append(f"error_rate {error_rate:.2%} exceeds max {thresholds.max_error_rate:.2%}")
-    if pass_rate < thresholds.min_pass_rate:
-        failures.append(f"case pass_rate {pass_rate:.2%} is below min {thresholds.min_pass_rate:.2%}")
-    for metric in metrics:
-        if metric.n == 0:
-            failures.append(f"{metric.name}: no scores recorded")
-        elif metric.gated:
-            failures.append(f"{metric.name} mean {metric.mean:.3f} is below threshold {metric.threshold:.3f}")
+    # Spec: Score >= 0.85 → SUCCESS; Score < 0.85 → FAILED (block merge).
+    if overall_score < thresholds.overall:
+        failures.append(
+            f"overall_score {overall_score:.3f} is below threshold {thresholds.overall:.3f} "
+            "(faithfulness, answer_relevance, tool_selection_precision mean)"
+        )
     if timed_out and completed_cases == 0:
         return RunStatus.TIMEOUT, GateDecision(passed=False, failures=failures)
     if failures:
@@ -144,7 +144,10 @@ def build_report(
     ]
     threshold_map = thresholds.as_metric_map()
     metrics = [aggregate_metric(results, name, threshold_map[name]) for name in metric_names]
+    scored = [item.mean for item in metrics if item.n > 0]
+    overall_score = round(mean(scored), 4) if scored else 0.0
     status, decision = decide_gate(
+        overall_score=overall_score,
         metrics=metrics,
         pass_rate=pass_rate,
         error_rate=error_rate,
@@ -157,6 +160,7 @@ def build_report(
         eval_run_id=eval_run_id,
         status=status,
         decision=decision,
+        overall_score=overall_score,
         total_cases=total_cases,
         completed_cases=completed,
         passed_cases=passed_cases,

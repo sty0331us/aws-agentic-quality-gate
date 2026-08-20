@@ -1,4 +1,4 @@
-"""Online agent invocation. Offline mode uses recorded traces on the golden case."""
+"""Resolve the agent-under-test trace: recorded, HTTP, or in-process Bedrock candidate."""
 
 from __future__ import annotations
 
@@ -21,11 +21,25 @@ def resolve_trace(
     mode: EvalMode,
     endpoint: str | None,
     api_key: str | None,
+    candidate_model_id: str,
+    region: str,
+    bedrock_enabled: bool,
+    bedrock_client: Any | None = None,
 ) -> AgentTrace:
     if mode is EvalMode.OFFLINE:
         if case.recorded_trace is None:
             raise AgentClientError(f"case {case.id} has no recorded_trace for offline eval")
         return case.recorded_trace
+    if mode is EvalMode.CANDIDATE:
+        from candidate_agent import run_candidate_agent
+
+        return run_candidate_agent(
+            case,
+            model_id=candidate_model_id,
+            region=region,
+            bedrock_enabled=bedrock_enabled,
+            client=bedrock_client,
+        )
     if not endpoint:
         raise AgentClientError("AGENT_ENDPOINT required for online eval")
     return invoke_agent(case, endpoint=endpoint, api_key=api_key)

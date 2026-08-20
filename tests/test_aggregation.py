@@ -61,6 +61,7 @@ def test_gate_passes_when_means_and_pass_rate_clear_thresholds() -> None:
     assert report.status is RunStatus.PASS
     assert report.decision.passed
     assert report.metric(MetricName.FAITHFULNESS).mean == 0.9
+    assert report.overall_score >= 0.85
 
 
 @pytest.mark.unit
@@ -84,7 +85,32 @@ def test_gate_fails_on_low_faithfulness() -> None:
         judge_model_id="test",
     )
     assert report.status is RunStatus.FAIL
-    assert any("faithfulness" in item for item in report.decision.failures)
+    assert any("overall_score" in item for item in report.decision.failures)
+
+
+@pytest.mark.unit
+def test_gate_passes_at_overall_threshold() -> None:
+    results = [
+        _result(
+            "c1",
+            {
+                MetricName.FAITHFULNESS: 0.85,
+                MetricName.ANSWER_RELEVANCE: 0.85,
+                MetricName.TOOL_SELECTION_PRECISION: 0.85,
+            },
+        )
+    ]
+    report = build_report(
+        eval_run_id="eval-1",
+        results=results,
+        total_cases=1,
+        thresholds=RunThresholds(),
+        github=GitHubContext(),
+        judge_model_id="test",
+    )
+    assert report.overall_score == 0.85
+    assert report.status is RunStatus.PASS
+    assert report.decision.passed
 
 
 @pytest.mark.unit

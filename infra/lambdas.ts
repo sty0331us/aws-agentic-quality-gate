@@ -92,6 +92,7 @@ export class EvalLambdas extends Construct {
       RESULTS_QUEUE_URL: props.resultsQueue.queueUrl,
       RUNS_TABLE_NAME: props.runsTable.tableName,
       GITHUB_SECRET_ARN: props.githubSecret.secretArn,
+      SLACK_SECRET_ARN: props.githubSecret.secretArn,
       OPENSEARCH_ENDPOINT: props.opensearchEndpoint,
       ECS_CLUSTER_NAME: props.ecsClusterName,
       ECS_SERVICE_NAME: props.ecsServiceName,
@@ -181,6 +182,7 @@ export function grantLambdaPermissions(props: {
   evalQueue: sqs.IQueue;
   resultsQueue: sqs.IQueue;
   runsTable: dynamodb.ITable;
+  manifestsTable: dynamodb.ITable;
   githubSecret: secretsmanager.ISecret;
   ecsClusterName: string;
   ecsServiceName: string;
@@ -193,6 +195,7 @@ export function grantLambdaPermissions(props: {
   props.resultsQueue.grantConsumeMessages(aggregatorRole);
   props.runsTable.grantReadWriteData(dispatcherRole);
   props.runsTable.grantReadWriteData(aggregatorRole);
+  props.manifestsTable.grantReadWriteData(dispatcherRole);
   props.githubSecret.grantRead(aggregatorRole);
 
   dispatcherRole.addToPolicy(

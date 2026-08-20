@@ -27,14 +27,24 @@ class Settings(BaseSettings):
     runs_table_name: str = Field(default="", alias="RUNS_TABLE_NAME")
     opensearch_endpoint: str = Field(default="", alias="OPENSEARCH_ENDPOINT")
     github_secret_arn: str = Field(default="", alias="GITHUB_SECRET_ARN")
+    manifests_table_name: str = Field(default="", alias="MANIFESTS_TABLE_NAME")
+    slack_webhook_url: str = Field(default="", alias="SLACK_WEBHOOK_URL")
+    slack_secret_arn: str = Field(default="", alias="SLACK_SECRET_ARN")
+    batch_job_queue: str = Field(default="", alias="BATCH_JOB_QUEUE")
+    batch_job_definition: str = Field(default="", alias="BATCH_JOB_DEFINITION")
+    compute_backend: str = Field(default="ecs", alias="COMPUTE_BACKEND")
     ecs_cluster_name: str = Field(default="", alias="ECS_CLUSTER_NAME")
     ecs_service_name: str = Field(default="", alias="ECS_SERVICE_NAME")
 
-    eval_mode: EvalMode = Field(default=EvalMode.OFFLINE, alias="EVAL_MODE")
-    eval_backend: EvalBackend = Field(default=EvalBackend.NATIVE, alias="EVAL_BACKEND")
+    eval_mode: EvalMode = Field(default=EvalMode.CANDIDATE, alias="EVAL_MODE")
+    eval_backend: EvalBackend = Field(default=EvalBackend.DEEPEVAL, alias="EVAL_BACKEND")
     judge_model_id: str = Field(
-        default="us.anthropic.claude-3-5-haiku-20241022-v1:0",
+        default="us.anthropic.claude-3-5-sonnet-20241022-v2:0",
         alias="JUDGE_MODEL_ID",
+    )
+    candidate_model_id: str = Field(
+        default="us.anthropic.claude-3-5-haiku-20241022-v1:0",
+        alias="CANDIDATE_MODEL_ID",
     )
     bedrock_enabled: bool = Field(default=True, alias="BEDROCK_ENABLED")
     shard_size: int = Field(default=8, ge=1, le=100, alias="SHARD_SIZE")
@@ -50,9 +60,10 @@ class Settings(BaseSettings):
     github_token: str = Field(default="", alias="GITHUB_TOKEN")
     github_app_id: str = Field(default="", alias="GITHUB_APP_ID")
 
-    threshold_faithfulness: float = Field(default=0.70, alias="THRESHOLD_FAITHFULNESS")
-    threshold_answer_relevance: float = Field(default=0.70, alias="THRESHOLD_ANSWER_RELEVANCE")
-    threshold_tool_selection_precision: float = Field(default=0.80, alias="THRESHOLD_TOOL_SELECTION_PRECISION")
+    threshold_overall: float = Field(default=0.85, alias="THRESHOLD_OVERALL")
+    threshold_faithfulness: float = Field(default=0.85, alias="THRESHOLD_FAITHFULNESS")
+    threshold_answer_relevance: float = Field(default=0.85, alias="THRESHOLD_ANSWER_RELEVANCE")
+    threshold_tool_selection_precision: float = Field(default=0.85, alias="THRESHOLD_TOOL_SELECTION_PRECISION")
     threshold_min_pass_rate: float = Field(default=0.85, alias="THRESHOLD_MIN_PASS_RATE")
     threshold_max_error_rate: float = Field(default=0.05, alias="THRESHOLD_MAX_ERROR_RATE")
 
@@ -62,6 +73,7 @@ class Settings(BaseSettings):
 
     def thresholds(self) -> RunThresholds:
         return RunThresholds(
+            overall=self.threshold_overall,
             faithfulness=self.threshold_faithfulness,
             answer_relevance=self.threshold_answer_relevance,
             tool_selection_precision=self.threshold_tool_selection_precision,

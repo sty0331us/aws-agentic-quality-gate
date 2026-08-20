@@ -11,6 +11,9 @@ export interface EvalQueuesProps {
   readonly alarmTopic?: sns.ITopic;
 }
 
+/**
+ * FIFO evaluation job queue: message deduplication + per-shard concurrency buffer.
+ */
 export class EvalQueues extends Construct {
   public readonly evalQueue: sqs.Queue;
   public readonly evalDlq: sqs.Queue;
@@ -22,14 +25,19 @@ export class EvalQueues extends Construct {
     const { config } = props;
 
     this.evalDlq = new sqs.Queue(this, "EvalDlq", {
-      queueName: resourceName(config, "eval-dlq"),
+      queueName: `${resourceName(config, "eval-dlq")}.fifo`,
+      fifo: true,
       retentionPeriod: cdk.Duration.days(14),
       encryption: sqs.QueueEncryption.SQS_MANAGED,
       enforceSSL: true,
     });
 
     this.evalQueue = new sqs.Queue(this, "EvalQueue", {
-      queueName: resourceName(config, "eval"),
+      queueName: `${resourceName(config, "eval")}.fifo`,
+      fifo: true,
+      contentBasedDeduplication: false,
+      deduplicationScope: sqs.DeduplicationScope.MESSAGE_GROUP,
+      fifoThroughputLimit: sqs.FifoThroughputLimit.PER_MESSAGE_GROUP_ID,
       visibilityTimeout: cdk.Duration.minutes(15),
       retentionPeriod: cdk.Duration.days(4),
       receiveMessageWaitTime: cdk.Duration.seconds(20),
@@ -42,14 +50,19 @@ export class EvalQueues extends Construct {
     });
 
     this.resultsDlq = new sqs.Queue(this, "ResultsDlq", {
-      queueName: resourceName(config, "results-dlq"),
+      queueName: `${resourceName(config, "results-dlq")}.fifo`,
+      fifo: true,
       retentionPeriod: cdk.Duration.days(14),
       encryption: sqs.QueueEncryption.SQS_MANAGED,
       enforceSSL: true,
     });
 
     this.resultsQueue = new sqs.Queue(this, "ResultsQueue", {
-      queueName: resourceName(config, "results"),
+      queueName: `${resourceName(config, "results")}.fifo`,
+      fifo: true,
+      contentBasedDeduplication: false,
+      deduplicationScope: sqs.DeduplicationScope.MESSAGE_GROUP,
+      fifoThroughputLimit: sqs.FifoThroughputLimit.PER_MESSAGE_GROUP_ID,
       visibilityTimeout: cdk.Duration.minutes(2),
       receiveMessageWaitTime: cdk.Duration.seconds(20),
       encryption: sqs.QueueEncryption.SQS_MANAGED,

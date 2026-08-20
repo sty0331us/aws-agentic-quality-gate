@@ -45,7 +45,7 @@ def heuristic_faithfulness(case: GoldenCase, trace: AgentTrace) -> MetricScore:
     return MetricScore(
         name=MetricName.FAITHFULNESS,
         score=score,
-        passed=score >= 0.70,
+        passed=score >= 0.85,
         reasoning="Heuristic lexical overlap with retrieved/expected contexts (local backend).",
         chain_of_thought=("Used for dry-runs when Bedrock is disabled. Not a substitute for LLM-as-a-Judge."),
         details={"backend": "heuristic"},
@@ -74,7 +74,7 @@ def heuristic_relevance(case: GoldenCase, trace: AgentTrace) -> MetricScore:
     return MetricScore(
         name=MetricName.ANSWER_RELEVANCE,
         score=score,
-        passed=score >= 0.70,
+        passed=score >= 0.85,
         reasoning="Heuristic token overlap between query/expected answer and actual answer.",
         chain_of_thought="Local dry-run scorer.",
         details={"backend": "heuristic"},

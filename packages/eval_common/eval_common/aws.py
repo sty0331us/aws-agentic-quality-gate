@@ -70,13 +70,21 @@ def list_json_keys(s3: Any, bucket: str, prefix: str) -> list[str]:
     return keys
 
 
-def send_json(sqs: Any, queue_url: str, payload: Any, group_id: str | None = None) -> None:
-    body = orjson.dumps(payload, default=str).decode("utf-8")
-    kwargs: dict[str, Any] = {"QueueUrl": queue_url, "MessageBody": body}
-    if group_id is not None:
-        kwargs["MessageGroupId"] = group_id
-        kwargs["MessageDeduplicationId"] = group_id
-    sqs.send_message(**kwargs)
+def send_fifo_json(
+    sqs: Any,
+    queue_url: str,
+    payload: Any,
+    *,
+    group_id: str,
+    dedup_id: str,
+) -> None:
+    body = payload if isinstance(payload, str) else orjson.dumps(payload, default=str).decode("utf-8")
+    sqs.send_message(
+        QueueUrl=queue_url,
+        MessageBody=body,
+        MessageGroupId=group_id,
+        MessageDeduplicationId=dedup_id[:128],
+    )
 
 
 def chunked[T](items: list[T], size: int) -> list[list[T]]:

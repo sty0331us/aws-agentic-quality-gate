@@ -23,7 +23,7 @@ def _score(name: MetricName, value: float) -> MetricScore:
     return MetricScore(
         name=name,
         score=round(bounded, 4),
-        passed=bounded >= 0.70,
+        passed=bounded >= 0.85,
         reasoning="Scored by Ragas.",
         chain_of_thought="Ragas metric over the (question, answer, contexts) triple.",
         details={"backend": "ragas"},

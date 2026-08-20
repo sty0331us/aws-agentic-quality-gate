@@ -4,6 +4,9 @@ import * as iam from "aws-cdk-lib/aws-iam";
 import * as sns from "aws-cdk-lib/aws-sns";
 import { Construct } from "constructs";
 import { loadConfig } from "../config";
+import { BatchEvaluator } from "../batch_evaluator";
+import { EvalCodePipeline } from "../codepipeline";
+import { EvalDashboard } from "../dashboard";
 import { EvaluatorService } from "../ecs_evaluator";
 import { GitHubOidc } from "../github_oidc";
 import { EvalLambdas, grantLambdaPermissions } from "../lambdas";
@@ -60,14 +63,19 @@ export class AgenticQualityGateStack extends cdk.Stack {
     const sharedEnv = {
       ENVIRONMENT: config.envName,
       JUDGE_MODEL_ID: config.judgeModelId,
+      CANDIDATE_MODEL_ID: config.candidateModelId,
+      EVAL_MODE: "candidate",
+      EVAL_BACKEND: "deepeval",
       SHARD_SIZE: String(config.shardSize),
       MAX_WORKERS: String(config.maxWorkers),
       GITHUB_REPO: config.githubRepo,
+      THRESHOLD_OVERALL: config.thresholds.overall,
       THRESHOLD_FAITHFULNESS: config.thresholds.faithfulness,
       THRESHOLD_ANSWER_RELEVANCE: config.thresholds.answerRelevance,
       THRESHOLD_TOOL_SELECTION_PRECISION: config.thresholds.toolSelectionPrecision,
       THRESHOLD_MIN_PASS_RATE: config.thresholds.minPassRate,
       THRESHOLD_MAX_ERROR_RATE: config.thresholds.maxErrorRate,
+      COMPUTE_BACKEND: process.env.COMPUTE_BACKEND ?? "ecs",
       LOG_LEVEL: "INFO",
     };
 
@@ -92,6 +100,7 @@ export class AgenticQualityGateStack extends cdk.Stack {
       evalQueue: queues.evalQueue,
       resultsQueue: queues.resultsQueue,
       runsTable: storage.runsTable,
+      manifestsTable: storage.manifestsTable,
       githubSecret: storage.githubSecret,
       ecsClusterName: evaluator.cluster.clusterName,
       ecsServiceName: evaluator.service.serviceName,
@@ -110,7 +119,48 @@ export class AgenticQualityGateStack extends cdk.Stack {
       aggregatorRole,
       ecsClusterName: evaluator.cluster.clusterName,
       ecsServiceName: evaluator.service.serviceName,
-      envVars: sharedEnv,
+      envVars: {
+        ...sharedEnv,
+        MANIFESTS_TABLE_NAME: storage.manifestsTable.tableName,
+      },
+    });
+
+    const batchFleet = new BatchEvaluator(this, "BatchFleet", {
+      config,
+      vpc,
+      image: evaluator.image,
+      taskRole: workerRole,
+      envVars: {
+        ...sharedEnv,
+        MANIFESTS_TABLE_NAME: storage.manifestsTable.tableName,
+        EVAL_QUEUE_URL: queues.evalQueue.queueUrl,
+        RESULTS_QUEUE_URL: queues.resultsQueue.queueUrl,
+        RESULTS_BUCKET: storage.resultsBucket.bucketName,
+        RUNS_TABLE_NAME: storage.runsTable.tableName,
+        OPENSEARCH_ENDPOINT: search.endpoint,
+      },
+    });
+    lambdas.dispatcher.addEnvironment("BATCH_JOB_QUEUE", batchFleet.jobQueue.ref);
+    lambdas.dispatcher.addEnvironment("BATCH_JOB_DEFINITION", batchFleet.jobDefinition.ref);
+    dispatcherRole.addToPolicy(
+      new iam.PolicyStatement({
+        actions: ["batch:SubmitJob", "batch:DescribeJobs"],
+        resources: ["*"],
+      }),
+    );
+    aggregatorRole.addToPolicy(
+      new iam.PolicyStatement({
+        actions: ["cloudwatch:PutMetricData"],
+        resources: ["*"],
+        conditions: { StringEquals: { "cloudwatch:namespace": "AgenticQualityGate" } },
+      }),
+    );
+
+    new EvalDashboard(this, "Dashboard", { config });
+    new EvalCodePipeline(this, "CodePipeline", {
+      config,
+      dispatcher: lambdas.dispatcher,
+      datasetBucket: storage.datasetBucket,
     });
 
     new GitHubOidc(this, "GitHubOidc", {

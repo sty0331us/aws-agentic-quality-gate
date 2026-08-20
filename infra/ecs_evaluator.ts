@@ -34,6 +34,7 @@ export class EvaluatorService extends Construct {
   public readonly cluster: ecs.Cluster;
   public readonly service: ecs.FargateService;
   public readonly taskDefinition: ecs.FargateTaskDefinition;
+  public readonly image: ecr_assets.DockerImageAsset;
 
   constructor(scope: Construct, id: string, props: EvaluatorServiceProps) {
     super(scope, id);
@@ -70,11 +71,11 @@ export class EvaluatorService extends Construct {
       taskRole: props.taskRole,
     });
 
-    const image = new ecr_assets.DockerImageAsset(this, "WorkerImage", {
+    this.image = new ecr_assets.DockerImageAsset(this, "WorkerImage", {
       directory: path.join(__dirname, ".."),
       file: "services/worker/Dockerfile",
       platform: ecr_assets.Platform.LINUX_AMD64,
-      buildArgs: { INSTALL_EVAL_LIBS: process.env.INSTALL_EVAL_LIBS ?? "false" },
+      buildArgs: { INSTALL_EVAL_LIBS: process.env.INSTALL_EVAL_LIBS ?? "true" },
     });
 
     const logGroup = new logs.LogGroup(this, "WorkerLogs", {
@@ -84,7 +85,7 @@ export class EvaluatorService extends Construct {
     });
 
     this.taskDefinition.addContainer("evaluator", {
-      image: ecs.ContainerImage.fromDockerImageAsset(image),
+      image: ecs.ContainerImage.fromDockerImageAsset(this.image),
       logging: ecs.LogDrivers.awsLogs({ logGroup, streamPrefix: "evaluator" }),
       environment: {
         ...props.envVars,

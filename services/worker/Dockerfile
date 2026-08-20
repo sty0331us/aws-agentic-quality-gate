@@ -19,7 +19,7 @@ COPY packages/eval_common /app/packages/eval_common
 COPY services/worker/requirements.txt /tmp/requirements.txt
 COPY services/worker/requirements-eval-libs.txt /tmp/requirements-eval-libs.txt
 
-ARG INSTALL_EVAL_LIBS=false
+ARG INSTALL_EVAL_LIBS=true
 RUN pip install --upgrade pip \
     && pip install /app/packages/eval_common -r /tmp/requirements.txt \
     && if [ "$INSTALL_EVAL_LIBS" = "true" ]; then pip install -r /tmp/requirements-eval-libs.txt; fi

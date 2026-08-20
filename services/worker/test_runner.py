@@ -63,6 +63,9 @@ def evaluate_case(
             mode=job.eval_mode,
             endpoint=job.agent_endpoint or settings.agent_endpoint or None,
             api_key=settings.agent_api_key or None,
+            candidate_model_id=job.candidate_model_id or settings.candidate_model_id,
+            region=settings.aws_region,
+            bedrock_enabled=settings.bedrock_enabled,
         )
         metrics = [
             score_faithfulness(
@@ -97,6 +100,9 @@ def evaluate_case(
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             judge_model_id=job.judge_model_id,
+            candidate_model_id=job.candidate_model_id,
+            tool_call_logs=list(trace.tool_calls),
+            retrieved_contexts=list(trace.retrieved_contexts),
             evaluated_at=utc_now_iso(),
         )
     except Exception as exc:
@@ -125,11 +131,14 @@ def process_message(
     log: Any,
 ) -> None:
     job = EvalJobMessage.model_validate_json(body)
+    job_judge = judge
+    if settings.bedrock_enabled and (judge is None or judge.model_id != job.judge_model_id):
+        job_judge = BedrockJudge(model_id=job.judge_model_id, region=settings.aws_region)
     shard = get_json_uri(clients["s3"], job.shard_s3_uri)
     cases = [GoldenCase.model_validate(item) for item in shard["cases"]]
     thresholds = settings.thresholds()
     results = [
-        evaluate_case(job=job, case=case, settings=settings, judge=judge, thresholds=thresholds) for case in cases
+        evaluate_case(job=job, case=case, settings=settings, judge=job_judge, thresholds=thresholds) for case in cases
     ]
     results_bucket, _ = parse_s3_uri(job.shard_s3_uri)
     result_key = f"runs/{job.eval_run_id}/results/shard-{job.shard_id:04d}.json"
@@ -140,17 +149,20 @@ def process_message(
         {"results": [item.model_dump(mode="json") for item in results]},
     )
     if settings.results_queue_url:
-        clients["sqs"].send_message(
-            QueueUrl=settings.results_queue_url,
-            MessageBody=orjson.dumps(
-                {
-                    "eval_run_id": job.eval_run_id,
-                    "shard_id": job.shard_id,
-                    "case_ids": job.case_ids,
-                    "result_s3_uri": f"s3://{results_bucket}/{result_key}",
-                }
-            ).decode("utf-8"),
-        )
+        body = {
+            "eval_run_id": job.eval_run_id,
+            "shard_id": job.shard_id,
+            "case_ids": job.case_ids,
+            "result_s3_uri": f"s3://{results_bucket}/{result_key}",
+        }
+        send_kwargs: dict[str, Any] = {
+            "QueueUrl": settings.results_queue_url,
+            "MessageBody": orjson.dumps(body).decode("utf-8"),
+        }
+        if ".fifo" in settings.results_queue_url:
+            send_kwargs["MessageGroupId"] = job.fifo_group_id()
+            send_kwargs["MessageDeduplicationId"] = f"{job.fifo_dedup_id()}-result"
+        clients["sqs"].send_message(**send_kwargs)
     if settings.runs_table_name:
         try:
             increment_completed_shard(
@@ -177,12 +189,25 @@ def run_forever(settings: Settings | None = None) -> None:
     log = configure_logging(settings.log_level)
     signal.signal(signal.SIGTERM, _handle_signal)
     signal.signal(signal.SIGINT, _handle_signal)
-    if not settings.eval_queue_url:
-        raise SystemExit("EVAL_QUEUE_URL is required")
     clients = _clients(settings.aws_region)
     judge = None
     if settings.bedrock_enabled:
         judge = BedrockJudge(model_id=settings.judge_model_id, region=settings.aws_region)
+
+    one_shot = os.environ.get("EVAL_JOB_JSON")
+    if one_shot:
+        log.info("batch one-shot shard")
+        process_message(
+            body=os.environ["EVAL_JOB_JSON"],
+            settings=settings,
+            clients=clients,
+            judge=judge,
+            log=log,
+        )
+        return
+
+    if not settings.eval_queue_url:
+        raise SystemExit("EVAL_QUEUE_URL is required")
     idle_started = time.monotonic()
     log.info("worker started", extra={"queue": settings.eval_queue_url, "backend": settings.eval_backend})
     while not _STOP:

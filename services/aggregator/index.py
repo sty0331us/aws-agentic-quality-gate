@@ -9,6 +9,7 @@ import boto3
 from aws_lambda_powertools import Logger, Metrics, Tracer
 from aws_lambda_powertools.metrics import MetricUnit
 from botocore.config import Config
+from cloudwatch_metrics import publish_gate_metrics
 from eval_common.aggregation import build_report
 from eval_common.aws import get_json, list_json_keys, put_json_model, report_key
 from eval_common.models import CaseResult, RunStatus
@@ -16,6 +17,7 @@ from eval_common.reporting import markdown_report
 from eval_common.runs import get_run, load_manifest_s3, put_run
 from github_status import publish_github_gate
 from opensearch_sink import index_report
+from slack_alert import notify_slack_failure
 
 logger = Logger(service="aqg-aggregator")
 tracer = Tracer(service="aqg-aggregator")
@@ -29,7 +31,7 @@ def _clients() -> dict[str, Any]:
         "s3": boto3.client("s3", region_name=region, config=_RETRY),
         "ddb": boto3.client("dynamodb", region_name=region, config=_RETRY),
         "secrets": boto3.client("secretsmanager", region_name=region, config=_RETRY),
-        "events": boto3.client("events", region_name=region, config=_RETRY),
+        "cloudwatch": boto3.client("cloudwatch", region_name=region, config=_RETRY),
     }
 
 
@@ -153,6 +155,21 @@ def aggregate_run(event: dict[str, Any], context: Any) -> dict[str, Any]:
         token_override=os.environ.get("GITHUB_TOKEN") or None,
         secret_arn=os.environ.get("GITHUB_SECRET_ARN") or None,
     )
+    slack_result: dict[str, Any] = {"notified": False}
+    try:
+        slack_result = notify_slack_failure(
+            report=report,
+            markdown=md,
+            secrets=clients["secrets"],
+            webhook_override=os.environ.get("SLACK_WEBHOOK_URL") or None,
+            secret_arn=os.environ.get("SLACK_SECRET_ARN") or os.environ.get("GITHUB_SECRET_ARN") or None,
+        )
+    except Exception:
+        logger.exception("slack alert failed")
+    try:
+        publish_gate_metrics(clients["cloudwatch"], report)
+    except Exception:
+        logger.exception("cloudwatch metrics failed")
     try:
         index_report(report, results)
     except Exception:
@@ -172,16 +189,20 @@ def aggregate_run(event: dict[str, Any], context: Any) -> dict[str, Any]:
             "passed": report.decision.passed,
             "failures": report.decision.failures,
             "github": github_result,
+            "slack": slack_result,
             "report_uri": report_uri,
+            "overall_score": report.overall_score,
         },
     )
     return {
         "eval_run_id": eval_run_id,
         "status": report.status.value,
         "passed": report.decision.passed,
+        "overall_score": report.overall_score,
         "failures": report.decision.failures,
         "report_uri": report_uri,
         "github": github_result,
+        "slack": slack_result,
     }
 
 

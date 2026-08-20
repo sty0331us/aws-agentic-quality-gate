@@ -39,7 +39,7 @@ def tool_selection_score(case: GoldenCase, trace: AgentTrace) -> MetricScore:
     f1 = 0.0 if precision + recall == 0 else 2 * precision * recall / (precision + recall)
     # Gate on precision: hallucinated tool calls are the usual production failure mode.
     score = round(precision, 4)
-    threshold = 0.80
+    threshold = 0.85
     return MetricScore(
         name=MetricName.TOOL_SELECTION_PRECISION,
         score=score,

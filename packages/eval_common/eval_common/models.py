@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field, field_validator
 class EvalMode(StrEnum):
     OFFLINE = "offline"
     ONLINE = "online"
+    CANDIDATE = "candidate"
 
 
 class EvalBackend(StrEnum):
@@ -20,6 +21,11 @@ class EvalBackend(StrEnum):
     DEEPEVAL = "deepeval"
     RAGAS = "ragas"
     ALL = "all"
+
+
+DEFAULT_JUDGE_MODEL_ID = "us.anthropic.claude-3-5-sonnet-20241022-v2:0"
+DEFAULT_CANDIDATE_MODEL_ID = "us.anthropic.claude-3-5-haiku-20241022-v1:0"
+OVERALL_SCORE_THRESHOLD = 0.85
 
 
 class Suite(StrEnum):
@@ -111,11 +117,17 @@ class GoldenDataset(BaseModel):
 
 
 class RunThresholds(BaseModel):
-    """Gate thresholds. Scores are in [0, 1]. A PR fails if any check trips."""
+    """Gate thresholds. Scores are in [0, 1].
 
-    faithfulness: float = Field(default=0.70, ge=0.0, le=1.0)
-    answer_relevance: float = Field(default=0.70, ge=0.0, le=1.0)
-    tool_selection_precision: float = Field(default=0.80, ge=0.0, le=1.0)
+    Deployment decision is overall_score >= 0.85 (spec). Per-metric floors are
+    recorded on the report and published to CloudWatch but do not override the
+    composite gate unless overall is below the cutoff.
+    """
+
+    overall: float = Field(default=0.85, ge=0.0, le=1.0)
+    faithfulness: float = Field(default=0.85, ge=0.0, le=1.0)
+    answer_relevance: float = Field(default=0.85, ge=0.0, le=1.0)
+    tool_selection_precision: float = Field(default=0.85, ge=0.0, le=1.0)
     min_pass_rate: float = Field(default=0.85, ge=0.0, le=1.0)
     max_error_rate: float = Field(default=0.05, ge=0.0, le=1.0)
 
@@ -135,20 +147,41 @@ class GitHubContext(BaseModel):
     installation_id: int | None = None
 
 
+class DatasetManifest(BaseModel):
+    """Commit-hash keyed golden-set pointer stored in DynamoDB and/or S3."""
+
+    dataset_id: str
+    git_sha: str | None = None
+    s3_uri: str
+    version: str = "1.0"
+    name: str = "golden"
+    case_count: int = 0
+    created_at: str = Field(default_factory=utc_now_iso)
+
+
 class EvalJobMessage(BaseModel):
-    """SQS payload. Keep small; case bodies live in S3."""
+    """SQS FIFO payload. Keep small; case bodies live in S3."""
 
     schema_version: str = "1.0"
     eval_run_id: str
     shard_id: int = Field(ge=0)
     shard_s3_uri: str
     case_ids: list[str]
-    eval_mode: EvalMode = EvalMode.OFFLINE
-    eval_backend: EvalBackend = EvalBackend.NATIVE
-    judge_model_id: str
+    eval_mode: EvalMode = EvalMode.CANDIDATE
+    eval_backend: EvalBackend = EvalBackend.DEEPEVAL
+    judge_model_id: str = DEFAULT_JUDGE_MODEL_ID
+    candidate_model_id: str = DEFAULT_CANDIDATE_MODEL_ID
+    dataset_manifest_id: str | None = None
     agent_endpoint: str | None = None
     github: GitHubContext = Field(default_factory=GitHubContext)
     created_at: str = Field(default_factory=utc_now_iso)
+
+    def fifo_group_id(self) -> str:
+        # One group per shard so evaluators can run in parallel (concurrency buffer).
+        return f"{self.eval_run_id}-{self.shard_id:04d}"
+
+    def fifo_dedup_id(self) -> str:
+        return f"{self.eval_run_id}-shard-{self.shard_id:04d}"
 
 
 class ClaimVerdict(BaseModel):
@@ -181,6 +214,9 @@ class CaseResult(BaseModel):
     input_tokens: int = 0
     output_tokens: int = 0
     judge_model_id: str
+    candidate_model_id: str | None = None
+    tool_call_logs: list[ToolCall] = Field(default_factory=list)
+    retrieved_contexts: list[str] = Field(default_factory=list)
     error: str | None = None
     evaluated_at: str = Field(default_factory=utc_now_iso)
     metadata: dict[str, Any] = Field(default_factory=dict)
@@ -206,9 +242,11 @@ class RunManifest(BaseModel):
     total_shards: int
     completed_shards: int = 0
     completed_cases: int = 0
-    eval_mode: EvalMode = EvalMode.OFFLINE
-    eval_backend: EvalBackend = EvalBackend.NATIVE
-    judge_model_id: str
+    eval_mode: EvalMode = EvalMode.CANDIDATE
+    eval_backend: EvalBackend = EvalBackend.DEEPEVAL
+    judge_model_id: str = DEFAULT_JUDGE_MODEL_ID
+    candidate_model_id: str = DEFAULT_CANDIDATE_MODEL_ID
+    dataset_manifest_id: str | None = None
     agent_endpoint: str | None = None
     github: GitHubContext = Field(default_factory=GitHubContext)
     thresholds: RunThresholds = Field(default_factory=RunThresholds)
@@ -239,6 +277,7 @@ class AggregateReport(BaseModel):
     eval_run_id: str
     status: RunStatus
     decision: GateDecision
+    overall_score: float
     total_cases: int
     completed_cases: int
     passed_cases: int
@@ -250,6 +289,7 @@ class AggregateReport(BaseModel):
     thresholds: RunThresholds
     github: GitHubContext = Field(default_factory=GitHubContext)
     judge_model_id: str
+    candidate_model_id: str | None = None
     estimated_cost_usd: float = 0.0
     created_at: str = Field(default_factory=utc_now_iso)
     s3_report_uri: str | None = None

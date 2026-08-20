@@ -15,6 +15,7 @@ export class EvalStorage extends Construct {
   public readonly datasetBucket: s3.Bucket;
   public readonly resultsBucket: s3.Bucket;
   public readonly runsTable: dynamodb.Table;
+  public readonly manifestsTable: dynamodb.Table;
   public readonly githubSecret: secretsmanager.Secret;
   public readonly key: kms.Key;
 
@@ -63,9 +64,18 @@ export class EvalStorage extends Construct {
       removalPolicy: config.envName === "prod" ? cdk.RemovalPolicy.RETAIN : cdk.RemovalPolicy.DESTROY,
     });
 
+    this.manifestsTable = new dynamodb.Table(this, "Manifests", {
+      tableName: resourceName(config, "manifests"),
+      partitionKey: { name: "dataset_id", type: dynamodb.AttributeType.STRING },
+      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+      encryption: dynamodb.TableEncryption.AWS_MANAGED,
+      pointInTimeRecovery: true,
+      removalPolicy: config.envName === "prod" ? cdk.RemovalPolicy.RETAIN : cdk.RemovalPolicy.DESTROY,
+    });
+
     this.githubSecret = new secretsmanager.Secret(this, "GitHubToken", {
       secretName: resourceName(config, "github"),
-      description: "GitHub token (or {GITHUB_TOKEN:...}) used by the aggregator to post checks",
+      description: "GitHub token and optional SLACK_WEBHOOK_URL for gate notifications",
       encryptionKey: this.key,
     });
     this.githubSecret.addToResourcePolicy(
@@ -82,6 +92,7 @@ export class EvalStorage extends Construct {
     new cdk.CfnOutput(this, "DatasetBucketName", { value: this.datasetBucket.bucketName });
     new cdk.CfnOutput(this, "ResultsBucketName", { value: this.resultsBucket.bucketName });
     new cdk.CfnOutput(this, "RunsTableName", { value: this.runsTable.tableName });
+    new cdk.CfnOutput(this, "ManifestsTableName", { value: this.manifestsTable.tableName });
     new cdk.CfnOutput(this, "GitHubSecretArn", { value: this.githubSecret.secretArn });
   }
 }

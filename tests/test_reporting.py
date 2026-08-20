@@ -36,4 +36,5 @@ def test_markdown_includes_gate_table() -> None:
     )
     md = markdown_report(report)
     assert "faithfulness" in md
+    assert "Overall score" in md
     assert "PASS" in md or "FAIL" in md

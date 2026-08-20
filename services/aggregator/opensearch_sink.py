@@ -22,7 +22,7 @@ def _signed_request(method: str, url: str, body: bytes, region: str) -> None:
         raise RuntimeError("no AWS credentials available for OpenSearch signing")
     frozen = credentials.get_frozen_credentials()
     request = AWSRequest(method=method, url=url, data=body, headers={"Content-Type": "application/json"})
-    SigV4Auth(frozen, "es", region).add_auth(request)
+    SigV4Auth(frozen, "aoss", region).add_auth(request)
     prepared = request.prepare()
     import httpx
 
@@ -48,10 +48,22 @@ def index_report(report: AggregateReport, results: list[CaseResult]) -> None:
         region,
     )
     for result in results:
+        doc = result.model_dump(mode="json")
+        doc["audit"] = {
+            "chain_of_thought": [m.get("chain_of_thought") for m in doc.get("metrics") or []],
+            "tool_call_logs": doc.get("tool_call_logs") or [],
+            "retrieved_contexts": doc.get("retrieved_contexts") or [],
+        }
+        _signed_request(
+            "PUT",
+            f"{origin}/eval-audit/_doc/{report.eval_run_id}:{result.case_id}",
+            orjson.dumps(doc),
+            region,
+        )
         _signed_request(
             "PUT",
             f"{origin}/eval-cases/_doc/{report.eval_run_id}:{result.case_id}",
-            orjson.dumps(result.model_dump(mode="json")),
+            orjson.dumps(doc),
             region,
         )
     logger.info("indexed report and %s cases", len(results))
