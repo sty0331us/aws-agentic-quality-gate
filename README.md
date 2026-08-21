@@ -2,33 +2,7 @@
 
 Automated **LLM-as-a-Judge** quality gate for Agentic RAG and tool-calling workflows. A developer PR (or prompt/RAG commit) triggers sharding over **Amazon SQS FIFO**, evaluation on **ECS Fargate Spot / AWS Batch**, and a merge decision of **overall score ≥ 0.85**.
 
-```text
- [ Developer PR / Prompt & RAG Commit ]
-                    │
-                    ▼ (Webhook: GitHub Actions / AWS CodePipeline)
-┌─────────────────────────────────────────────────────────────────┐
-│ 1. CI/CD Trigger & Sharding                                     │
-│  Dispatcher Lambda ── S3 / DynamoDB dataset manifest            │
-│       ▼  batch sharding + FIFO dedup + concurrency buffer       │
-│  Amazon SQS FIFO (Evaluation Job Queue)                         │
-└────────────────────┬────────────────────────────────────────────┘
-                     │
-┌────────────────────┴────────────────────────────────────────────┐
-│ 2. Distributed Evaluation Fleet (Batch / ECS Fargate Spot)      │
-│  DeepEval / Ragas harness                                       │
-│    Target agent: Bedrock candidate + RAG index + tool runner    │
-│    Judge: Bedrock Claude 3.5 Sonnet (CoT metric scoring)        │
-└────────────────────┬────────────────────────────────────────────┘
-                     │
-┌────────────────────┴────────────────────────────────────────────┐
-│ 3. Scoring Aggregation, Quality Gate & Governance               │
-│  Aggregator Lambda                                              │
-│    CloudWatch: Faithfulness, Answer Relevance, Tool Precision   │
-│    OpenSearch Serverless: audit logs + per-sample CoT traces    │
-│    Score ≥ 0.85 → GitHub ✅ SUCCESS                             │
-│    Score <  0.85 → GitHub ❌ FAILED + Slack alert (block merge) │
-└─────────────────────────────────────────────────────────────────┘
-```
+![Enterprise AI Architecture: Automated Agentic CI/CD Evaluation Engine on AWS](docs/architecture.jpg)
 
 ## What is gated
 
