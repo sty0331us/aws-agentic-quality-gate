@@ -13,7 +13,7 @@ The **deployment decision** is a single composite **overall score** (mean of fai
 | ✅ SUCCESS (proceed) | `overall_score >= 0.85` |
 | ❌ FAILED (block merge + Slack) | `overall_score < 0.85`, timeout, or no results |
 
-Per-metric series are still published to CloudWatch and shown on the PR comment. The judge is **Claude 3.5 Sonnet**; the agent under test is a Bedrock **candidate** model with an in-container RAG index and tool runner. DeepEval/Ragas is the default harness (native Bedrock CoT judge is the fallback).
+Per-metric series are still published to CloudWatch and shown on the PR comment. The judge is **Claude Sonnet 5**; the agent under test is a Bedrock **candidate** model with an in-container RAG index and tool runner. DeepEval/Ragas is the default harness (native Bedrock CoT judge is the fallback).
 
 ## Repository layout
 
@@ -45,7 +45,7 @@ Per-metric series are still published to CloudWatch and shown on the PR comment.
 
 ## Evaluation modes
 
-- **candidate** (default): in-container **target agent under test** — Bedrock candidate model + RAG index + tool runner, then Claude 3.5 Sonnet judge.
+- **candidate** (default): in-container **target agent under test** — Bedrock candidate model + RAG index + tool runner, then Claude Sonnet 5 judge.
 - **offline**: score `recorded_trace` on each golden case (deterministic CI replay).
 - **online**: workers POST `{case_id, query, metadata}` to `AGENT_ENDPOINT`.
 
@@ -70,7 +70,7 @@ make eval-local
 
 ## Deploy
 
-Prerequisites: Node 20+, AWS credentials, CDK bootstrap, Bedrock model access for **Claude 3.5 Sonnet** (judge) and the candidate model, and a GitHub token (or GitHub App) stored in Secrets Manager.
+Prerequisites: Node 20+, AWS credentials, CDK bootstrap, Bedrock model access for **Claude Sonnet 5** (judge) and the candidate model, and a GitHub token (or GitHub App) stored in Secrets Manager.
 
 ```bash
 cp .env.example .env
@@ -105,7 +105,7 @@ The evaluator image (`services/worker/Dockerfile`) bakes **DeepEval + Ragas** in
 
 1. GitHub Actions / CodePipeline uploads the golden set to `s3://$bucket/golden/<commit-sha>.json` and invokes the dispatcher with **commit hash + dataset manifest id**.
 2. Dispatcher pulls the dataset from **DynamoDB (manifest) or S3**, writes the manifest, shards cases, and always enqueues **SQS FIFO** messages (`MessageGroupId` + `MessageDeduplicationId`). ECS desired count is bumped, or AWS Batch Fargate Spot jobs are submitted when `COMPUTE_BACKEND=batch`.
-3. Parallel evaluator containers (DeepEval/Ragas) run the **target agent** (Bedrock candidate + RAG index + tool runner) and the **Claude 3.5 Sonnet** judge. Tool-call logs and retrieved contexts go to S3 with the scores.
+3. Parallel evaluator containers (DeepEval/Ragas) run the **target agent** (Bedrock candidate + RAG index + tool runner) and the **Claude Sonnet 5** judge. Tool-call logs and retrieved contexts go to S3 with the scores.
 4. Completing a shard notifies the results FIFO; the aggregator also sweeps every two minutes (`RUN_TIMEOUT_SECONDS`, default 30m).
 5. Aggregator computes **overall_score** (mean of Faithfulness, Answer Relevance, Tool Precision), publishes CloudWatch, indexes OpenSearch Serverless (`eval-audit`, `eval-cases`) with per-sample CoT, sets the GitHub Check, and **Slack-alerts on failure**. Merge proceeds only when `overall_score >= 0.85`.
 

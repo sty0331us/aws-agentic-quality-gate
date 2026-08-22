@@ -39,7 +39,7 @@ class Settings(BaseSettings):
     eval_mode: EvalMode = Field(default=EvalMode.CANDIDATE, alias="EVAL_MODE")
     eval_backend: EvalBackend = Field(default=EvalBackend.DEEPEVAL, alias="EVAL_BACKEND")
     judge_model_id: str = Field(
-        default="us.anthropic.claude-3-5-sonnet-20241022-v2:0",
+        default="us.anthropic.claude-sonnet-5",
         alias="JUDGE_MODEL_ID",
     )
     candidate_model_id: str = Field(

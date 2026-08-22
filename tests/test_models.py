@@ -35,7 +35,7 @@ def test_eval_job_defaults_match_architecture() -> None:
     assert job.eval_mode is EvalMode.CANDIDATE
     assert job.eval_backend is EvalBackend.DEEPEVAL
     assert job.judge_model_id == DEFAULT_JUDGE_MODEL_ID
-    assert "sonnet" in job.judge_model_id
+    assert job.judge_model_id == "us.anthropic.claude-sonnet-5"
     assert job.fifo_group_id() == "eval-1-0002"
     assert job.fifo_dedup_id() == "eval-1-shard-0002"
     assert OVERALL_SCORE_THRESHOLD == 0.85

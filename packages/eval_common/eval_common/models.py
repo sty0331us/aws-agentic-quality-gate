@@ -23,7 +23,7 @@ class EvalBackend(StrEnum):
     ALL = "all"
 
 
-DEFAULT_JUDGE_MODEL_ID = "us.anthropic.claude-3-5-sonnet-20241022-v2:0"
+DEFAULT_JUDGE_MODEL_ID = "us.anthropic.claude-sonnet-5"
 DEFAULT_CANDIDATE_MODEL_ID = "us.anthropic.claude-3-5-haiku-20241022-v1:0"
 OVERALL_SCORE_THRESHOLD = 0.85
 

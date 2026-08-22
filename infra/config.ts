@@ -23,7 +23,7 @@ export function loadConfig(): GateConfig {
     maxWorkers: Number(process.env.MAX_WORKERS ?? "20"),
     shardSize: Number(process.env.SHARD_SIZE ?? "8"),
     judgeModelId:
-      process.env.JUDGE_MODEL_ID ?? "us.anthropic.claude-3-5-sonnet-20241022-v2:0",
+      process.env.JUDGE_MODEL_ID ?? "us.anthropic.claude-sonnet-5",
     candidateModelId:
       process.env.CANDIDATE_MODEL_ID ?? "us.anthropic.claude-3-5-haiku-20241022-v1:0",
     githubRepo: process.env.GITHUB_REPO ?? "org/aws-agentic-quality-gate",
