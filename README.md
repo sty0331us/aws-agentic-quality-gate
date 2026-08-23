@@ -4,6 +4,76 @@ Automated **LLM-as-a-Judge** quality gate for Agentic RAG and tool-calling workf
 
 ![Enterprise AI Architecture: Automated Agentic CI/CD Evaluation Engine on AWS](docs/architecture.jpg)
 
+## Architecture audit
+
+Rigorous check of this repository against the three-layer target: CI/CD trigger and sharding, distributed evaluation fleet, scoring aggregation and governance.
+
+**Verdict: compliant.** Dispatcher always shards onto SQS FIFO after reading S3 or the DynamoDB dataset manifest. Fargate Spot and AWS Batch both consume that queue. Workers run the Bedrock candidate (RAG index + tool runner) under a **Claude 5 Sonnet** judge. Aggregator publishes CloudWatch Faithfulness / AnswerRelevance / ToolPrecision, indexes OpenSearch Serverless CoT audits, and gates the PR at `overall_score >= 0.85` with Slack on failure.
+
+| Control | Value |
+| --- | --- |
+| Spec controls matched | 15 / 15 |
+| Overall-score gate | `0.85` |
+| LLM-as-a-Judge | Claude 5 Sonnet (`us.anthropic.claude-sonnet-5`) |
+| Eval job queue | SQS FIFO |
+
+### Layer mapping
+
+| Layer | Spec | Implementation |
+| --- | --- | --- |
+| **1. CI/CD trigger and sharding** | Webhook → GitHub Actions / CodePipeline → Dispatcher Lambda → SQS | Dispatcher loads the golden set from S3 or DynamoDB, writes a commit-keyed manifest, and fans out FIFO messages with per-shard `MessageGroupId` and `MessageDeduplicationId`. |
+| **2. Distributed evaluation fleet** | AWS Batch / ECS Fargate Spot, DeepEval / Ragas | ECS Fargate Spot (weight 4, on-demand fallback) plus AWS Batch Fargate Spot. Candidate model + lexical RAG + allowlisted tools produce traces; Claude 5 Sonnet scores with chain-of-thought. |
+| **3. Aggregation and governance** | Aggregator Lambda, CloudWatch, OpenSearch, PR gate | `overall_score` mean of the three metrics. CloudWatch dashboard + OpenSearch `eval-audit`. GitHub Check success at ≥ 0.85; failure blocks merge and posts Slack. |
+
+### Requirement-by-requirement compliance
+
+| Layer | Spec requirement | Implementation | Status |
+| --- | --- | --- | --- |
+| 1. Trigger | Webhook from PR / prompt & RAG commit | GitHub Actions `eval-pipeline.yml` + optional CodePipeline / CodeStar | Compliant |
+| 1. Trigger | GitHub Actions / AWS CodePipeline | GHA default; `EvalCodePipeline` when `CODESTAR_CONNECTION_ARN` is set | Compliant |
+| 1. Trigger | Trigger with commit hash & dataset manifest | Dispatcher payload `git_sha` + `dataset_id`; DynamoDB manifests table | Compliant |
+| 1. Trigger | Evaluator Dispatcher Lambda | `services/dispatcher` — S3 Object Created + direct invoke | Compliant |
+| 1. Trigger | Pull golden dataset from S3 / DynamoDB | Manifest lookup then S3 object body; writes `DatasetManifest` | Compliant |
+| 1. Trigger | SQS eval queue with dedup + concurrency buffer | FIFO queues, `MessageGroupId` per shard, `MessageDeduplicationId` | Compliant |
+| 2. Fleet | AWS Batch / ECS Fargate Spot | Both provisioned; `COMPUTE_BACKEND=ecs\|batch\|both`; always consume SQS | Compliant |
+| 2. Fleet | Parallel evaluator containers (DeepEval / Ragas) | Worker image `INSTALL_EVAL_LIBS=true`; `EVAL_BACKEND=deepeval` default | Compliant |
+| 2. Fleet | Target agent: Bedrock candidate + RAG + tool runner | `EVAL_MODE=candidate`; `candidate_agent.py`, `rag_index.py`, `tool_runner.py` | Compliant |
+| 2. Fleet | Judge: Bedrock Claude 5 Sonnet + CoT scoring | `us.anthropic.claude-sonnet-5`; `chain_of_thought` on `MetricScore` | Compliant |
+| 3. Gate | Score Aggregator Lambda + pass/fail thresholds | `overall_score` = mean(faithfulness, answer_relevance, tool_precision) | Compliant |
+| 3. Gate | CloudWatch: Faithfulness, Answer Relevance, Tool Precision | Namespace `AgenticQualityGate` + dashboard widgets | Compliant |
+| 3. Gate | OpenSearch Serverless audit logs + per-sample CoT | `eval-audit` / `eval-cases` / `eval-reports`; SigV4 service `aoss` | Compliant |
+| 3. Gate | Score ≥ 0.85 → GitHub SUCCESS | Check conclusion `success`; GHA job exits 0 | Compliant |
+| 3. Gate | Score < 0.85 → FAILED, block merge, Slack alert | Check `failure` + required status check; Slack webhook on fail only | Compliant |
+
+### Gate math
+
+`overall_score` is the mean of the three metric means. Primary rule is `overall_score >= 0.85` proceed, otherwise fail. Timeout, zero results, or error rate above 5% also fail — they are operational failures, not extra metric floors.
+
+| Contract | Default |
+| --- | --- |
+| overall / faithfulness / answer relevance / tool precision | `0.85` |
+| Judge | Claude 5 Sonnet (`us.anthropic.claude-sonnet-5`) |
+| Candidate | Claude 3.5 Haiku (Bedrock) |
+| Default mode / backend | `candidate` / `deepeval` |
+
+### Gaps closed in this audit
+
+| Was (pre-audit) | Now (spec) |
+| --- | --- |
+| Standard SQS | FIFO + `MessageGroupId` / `MessageDeduplicationId` |
+| Dataset from S3 only | S3 or DynamoDB manifests table |
+| ECS only | ECS Fargate Spot and AWS Batch Fargate Spot |
+| DeepEval optional, native default | DeepEval default; libs baked into image |
+| Offline traces or HTTP agent | In-process Bedrock candidate + RAG + tools |
+| Judge default Haiku | Claude 5 Sonnet |
+| Per-metric floors 0.70 / 0.80 | Composite `overall_score >= 0.85` |
+| Powertools metrics only | `PutMetricData` Faithfulness / AnswerRelevance / ToolPrecision |
+| No Slack | Incoming webhook on gate failure |
+| GHA only | Optional CodePipeline + CodeBuild dispatch |
+| OpenSearch signed as `es` | SigV4 service `aoss` for Serverless |
+
+**Operating notes.** Candidate RAG is lexical over the golden-case corpus (swap-in point for a Bedrock Knowledge Base). Tool runner replays allowlisted calls in CI so tool precision is deterministic. Both compute fleets are always synthesized; `COMPUTE_BACKEND` chooses which one scales on a given run. Mark GitHub check `agentic-quality-gate` required to actually block merge.
+
 ## What is gated
 
 The **deployment decision** is a single composite **overall score** (mean of faithfulness, answer relevance, and tool-selection precision):
@@ -13,7 +83,7 @@ The **deployment decision** is a single composite **overall score** (mean of fai
 | ✅ SUCCESS (proceed) | `overall_score >= 0.85` |
 | ❌ FAILED (block merge + Slack) | `overall_score < 0.85`, timeout, or no results |
 
-Per-metric series are still published to CloudWatch and shown on the PR comment. The judge is **Claude Sonnet 5**; the agent under test is a Bedrock **candidate** model with an in-container RAG index and tool runner. DeepEval/Ragas is the default harness (native Bedrock CoT judge is the fallback).
+Per-metric series are still published to CloudWatch and shown on the PR comment. The judge is **Claude 5 Sonnet**; the agent under test is a Bedrock **candidate** model with an in-container RAG index and tool runner. DeepEval/Ragas is the default harness (native Bedrock CoT judge is the fallback).
 
 ## Repository layout
 
@@ -45,7 +115,7 @@ Per-metric series are still published to CloudWatch and shown on the PR comment.
 
 ## Evaluation modes
 
-- **candidate** (default): in-container **target agent under test** — Bedrock candidate model + RAG index + tool runner, then Claude Sonnet 5 judge.
+- **candidate** (default): in-container **target agent under test** — Bedrock candidate model + RAG index + tool runner, then Claude 5 Sonnet judge.
 - **offline**: score `recorded_trace` on each golden case (deterministic CI replay).
 - **online**: workers POST `{case_id, query, metadata}` to `AGENT_ENDPOINT`.
 
@@ -70,7 +140,7 @@ make eval-local
 
 ## Deploy
 
-Prerequisites: Node 20+, AWS credentials, CDK bootstrap, Bedrock model access for **Claude Sonnet 5** (judge) and the candidate model, and a GitHub token (or GitHub App) stored in Secrets Manager.
+Prerequisites: Node 20+, AWS credentials, CDK bootstrap, Bedrock model access for **Claude 5 Sonnet** (judge) and the candidate model, and a GitHub token (or GitHub App) stored in Secrets Manager.
 
 ```bash
 cp .env.example .env
@@ -105,7 +175,7 @@ The evaluator image (`services/worker/Dockerfile`) bakes **DeepEval + Ragas** in
 
 1. GitHub Actions / CodePipeline uploads the golden set to `s3://$bucket/golden/<commit-sha>.json` and invokes the dispatcher with **commit hash + dataset manifest id**.
 2. Dispatcher pulls the dataset from **DynamoDB (manifest) or S3**, writes the manifest, shards cases, and always enqueues **SQS FIFO** messages (`MessageGroupId` + `MessageDeduplicationId`). ECS desired count is bumped, or AWS Batch Fargate Spot jobs are submitted when `COMPUTE_BACKEND=batch`.
-3. Parallel evaluator containers (DeepEval/Ragas) run the **target agent** (Bedrock candidate + RAG index + tool runner) and the **Claude Sonnet 5** judge. Tool-call logs and retrieved contexts go to S3 with the scores.
+3. Parallel evaluator containers (DeepEval/Ragas) run the **target agent** (Bedrock candidate + RAG index + tool runner) and the **Claude 5 Sonnet** judge. Tool-call logs and retrieved contexts go to S3 with the scores.
 4. Completing a shard notifies the results FIFO; the aggregator also sweeps every two minutes (`RUN_TIMEOUT_SECONDS`, default 30m).
 5. Aggregator computes **overall_score** (mean of Faithfulness, Answer Relevance, Tool Precision), publishes CloudWatch, indexes OpenSearch Serverless (`eval-audit`, `eval-cases`) with per-sample CoT, sets the GitHub Check, and **Slack-alerts on failure**. Merge proceeds only when `overall_score >= 0.85`.
 
