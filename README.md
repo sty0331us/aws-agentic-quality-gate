@@ -4,26 +4,65 @@ Automated **LLM-as-a-Judge** quality gate for Agentic RAG and tool-calling workf
 
 ![Enterprise AI Architecture: Automated Agentic CI/CD Evaluation Engine on AWS](docs/architecture.jpg)
 
-## Architecture audit
+## Architectural audit — Agentic quality gate
 
-Rigorous check of this repository against the three-layer target: CI/CD trigger and sharding, distributed evaluation fleet, scoring aggregation and governance.
+Rigorous check of this repository against the three-layer target: CI/CD trigger and sharding, distributed evaluation fleet, scoring aggregation and governance. Verification: 22 pytest tests, Ruff clean, `tsc --noEmit` clean, local dry-run 10/10 PASS at overall 1.000 vs gate 0.85.
 
-**Verdict: compliant.** Dispatcher always shards onto SQS FIFO after reading S3 or the DynamoDB dataset manifest. Fargate Spot and AWS Batch both consume that queue. Workers run the Bedrock candidate (RAG index + tool runner) under a **Claude 5 Sonnet** judge. Aggregator publishes CloudWatch Faithfulness / AnswerRelevance / ToolPrecision, indexes OpenSearch Serverless CoT audits, and gates the PR at `overall_score >= 0.85` with Slack on failure.
+| **15/15** | **0.85** | **Claude 5 Sonnet** | **FIFO** |
+| --- | --- | --- | --- |
+| Spec controls matched | Overall-score gate | LLM-as-a-Judge | Eval job queue |
 
-| Control | Value |
+**Verdict: compliant with the target architecture**
+
+Dispatcher always shards onto SQS FIFO after reading S3 or the DynamoDB dataset manifest. Fargate Spot and AWS Batch both consume that queue. Workers run the Bedrock candidate (RAG index + tool runner) under a Claude 5 Sonnet judge. Aggregator publishes CloudWatch Faithfulness / AnswerRelevance / ToolPrecision, indexes OpenSearch Serverless CoT audits, and gates the PR at overall_score 0.85 with Slack on failure.
+
+### Live control plane (as implemented)
+
+Source: repository contracts and CDK after this audit · three ranks match spec layers 1–3.
+
+```mermaid
+flowchart TB
+  PR["Developer PR<br/>Prompt & RAG commit"] --> CICD["GitHub Actions<br/>AWS CodePipeline"]
+  GOLD["S3 / DynamoDB<br/>Golden dataset"] --> DISP["Dispatcher Lambda<br/>Shard + manifest"]
+  CICD --> DISP
+  DISP --> SQS["SQS FIFO<br/>Dedup + buffer"]
+  SQS --> FLEET["Batch / Fargate Spot<br/>DeepEval / Ragas"]
+  FLEET --> CAND["Candidate agent<br/>Bedrock + RAG + tools"]
+  CAND --> JUDGE["LLM-as-a-Judge<br/>Claude 5 Sonnet"]
+  JUDGE --> AGG["Aggregator Lambda<br/>overall_score"]
+  AGG --> CW["CloudWatch<br/>Faithfulness, AR, TP"]
+  AGG --> AOSS["OpenSearch Serverless<br/>Audit + CoT traces"]
+  AGG --> GATE["PR gate<br/>>= 0.85 SUCCESS"]
+```
+
+| Node | Role |
 | --- | --- |
-| Spec controls matched | 15 / 15 |
-| Overall-score gate | `0.85` |
-| LLM-as-a-Judge | Claude 5 Sonnet (`us.anthropic.claude-sonnet-5`) |
-| Eval job queue | SQS FIFO |
+| Developer PR | Prompt & RAG commit |
+| GitHub Actions | AWS CodePipeline |
+| Dispatcher Lambda | Shard + manifest |
+| S3 / DynamoDB | Golden dataset |
+| SQS FIFO | Dedup + buffer |
+| Batch / Fargate Spot | DeepEval / Ragas |
+| Candidate agent | Bedrock + RAG + tools |
+| LLM-as-a-Judge | Claude 5 Sonnet |
+| Aggregator Lambda | `overall_score` |
+| CloudWatch | Faithfulness, AR, TP |
+| OpenSearch Serverless | Audit + CoT traces |
+| PR gate | `>= 0.85` SUCCESS |
 
 ### Layer mapping
 
-| Layer | Spec | Implementation |
-| --- | --- | --- |
-| **1. CI/CD trigger and sharding** | Webhook → GitHub Actions / CodePipeline → Dispatcher Lambda → SQS | Dispatcher loads the golden set from S3 or DynamoDB, writes a commit-keyed manifest, and fans out FIFO messages with per-shard `MessageGroupId` and `MessageDeduplicationId`. |
-| **2. Distributed evaluation fleet** | AWS Batch / ECS Fargate Spot, DeepEval / Ragas | ECS Fargate Spot (weight 4, on-demand fallback) plus AWS Batch Fargate Spot. Candidate model + lexical RAG + allowlisted tools produce traces; Claude 5 Sonnet scores with chain-of-thought. |
-| **3. Aggregation and governance** | Aggregator Lambda, CloudWatch, OpenSearch, PR gate | `overall_score` mean of the three metrics. CloudWatch dashboard + OpenSearch `eval-audit`. GitHub Check success at ≥ 0.85; failure blocks merge and posts Slack. |
+**CI/CD trigger and sharding**
+
+Webhook into GitHub Actions or CodePipeline. Dispatcher Lambda loads the golden set from S3 or DynamoDB, writes a commit-keyed manifest, and fans out FIFO messages with per-shard group and dedup ids.
+
+**Distributed evaluation fleet**
+
+ECS Fargate Spot (weight 4, on-demand fallback) plus AWS Batch Fargate Spot. Containers run DeepEval/Ragas. Candidate model + lexical RAG + allowlisted tools produce traces; Claude 5 Sonnet scores with chain-of-thought.
+
+**Aggregation and governance**
+
+Aggregator computes overall_score. CloudWatch dashboard + OpenSearch eval-audit. GitHub Check success at >= 0.85; failure blocks merge and posts Slack.
 
 ### Requirement-by-requirement compliance
 
